@@ -5,59 +5,44 @@ const app = express();
 
 app.get("/api/tvdrm", async (req, res) => {
   try {
-    const scrapeApi = "https://symmetrical-space-rotary-phone-wrgrg69vqrrxhrpg-3000.app.github.dev/api/scrape?url=https://tv.infinityapi.org/f/swarnavahini";
+    // 1. Get token URL from your scraper
+    const scrapeUrl = "https://symmetrical-space-rotary-phone-wrgrg69vqrrxhrpg-3000.app.github.dev/api/scrape?url=https://tv.infinityapi.org/f/swarnavahini";
+    const scrapeRes = await fetch(scrapeUrl);
+    const scrapeJson = await scrapeRes.json();
 
-    // 1. Call the scrape API
-    const scrapeRes = await fetch(scrapeApi);
-    const scrapeData = await scrapeRes.json();
-
-    if (!scrapeData.success || !scrapeData.results?.[0]?.url) {
-      return res.status(500).json({ success: false, message: "Scrape API failed or returned no results." });
+    // 2. Check if scrape was successful
+    if (!scrapeJson.success || !scrapeJson.results?.[0]?.url) {
+      return res.status(502).json({ error: "Scraper failed or missing URL" });
     }
 
-    const tvstoreUrl = scrapeData.results[0].url;
-    console.log("Got tvstore URL:", tvstoreUrl);
+    const tvstoreUrl = scrapeJson.results[0].url;
 
-    // 2. Call the tvstore URL as plain text
+    // 3. Fetch from tvstore and proxy JSON directly
     const tvstoreRes = await fetch(tvstoreUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0", // Avoid bot blocking
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
       },
     });
 
-    const text = await tvstoreRes.text();
-    const trimmed = text.trim();
+    // 4. Set same headers and forward the JSON
+    res.set("Content-Type", "application/json");
+    const body = await tvstoreRes.text();
 
-    // 3. Check if HTML error
-    if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
-      console.log("HTML returned instead of JSON:", trimmed.slice(0, 300));
+    // 5. Handle malformed response
+    if (body.trim().startsWith("<")) {
       return res.status(500).json({
-        success: false,
-        message: "tvstore URL returned HTML instead of JSON. Maybe expired token?",
-        preview: trimmed.slice(0, 200),
+        error: "tvstore returned HTML instead of JSON",
+        preview: body.slice(0, 300),
       });
     }
 
-    // 4. Try parsing as JSON
-    let json;
-    try {
-      json = JSON.parse(trimmed);
-    } catch (e) {
-      return res.status(500).json({
-        success: false,
-        message: "tvstore response is not valid JSON",
-        preview: trimmed.slice(0, 300),
-      });
-    }
-
-    // 5. Return success
-    return res.json(json);
-
+    return res.send(body); // raw JSON
   } catch (err) {
-    console.error("Unexpected error:", err.message);
-    return res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ error: "Unexpected error", detail: err.message });
   }
 });
 
-const PORT = 3000;
-app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+app.listen(3000, () => {
+  console.log("API ready at http://localhost:3000/api/tvdrm");
+});
