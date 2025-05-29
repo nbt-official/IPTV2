@@ -3,43 +3,57 @@ import fetch from "node-fetch";
 
 const app = express();
 
-app.get("/api/tvdrm", async (req, res) => {
+app.get("/api/stv", async (req, res) => {
   try {
     const scrapeApiUrl = "https://symmetrical-space-rotary-phone-wrgrg69vqrrxhrpg-3000.app.github.dev/api/scrape?url=https://tv.infinityapi.org/f/swarnavahini";
 
-    // Call the scrape API
+    // Step 1: Get tvstore URL
     const scrapeRes = await fetch(scrapeApiUrl);
-    if (!scrapeRes.ok) throw new Error(`Scrape API returned status ${scrapeRes.status}`);
-
     const scrapeData = await scrapeRes.json();
 
     if (!scrapeData.success || !scrapeData.results || scrapeData.results.length === 0) {
       return res.status(404).json({ success: false, message: "No tvstore URL found" });
     }
 
-    // Extract the tvstore API URL
     const tvstoreUrl = scrapeData.results[0].url;
 
-    // Call the tvstore API URL
+    // Step 2: Fetch the tvstore result as text
     const tvstoreRes = await fetch(tvstoreUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0",  // sometimes helps avoid bot blocking
-      },
+        "User-Agent": "Mozilla/5.0", // prevent being blocked as bot
+      }
     });
 
-    if (!tvstoreRes.ok) throw new Error(`TVstore API returned status ${tvstoreRes.status}`);
+    const text = await tvstoreRes.text();
 
-    // Parse the DRM JSON response from tvstore API
-    const tvstoreData = await tvstoreRes.json();
+    // Step 3: Detect if HTML was returned instead of JSON
+    if (text.startsWith("<!DOCTYPE html") || text.startsWith("<html")) {
+      return res.status(500).json({
+        success: false,
+        message: "tvstore URL returned HTML instead of JSON. Token might be expired."
+      });
+    }
 
-    // Return the DRM JSON data directly
-    return res.json(tvstoreData);
+    // Step 4: Try parsing JSON
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      return res.status(500).json({
+        success: false,
+        message: "tvstore response was not valid JSON",
+        preview: text.slice(0, 100)
+      });
+    }
+
+    // Success
+    return res.json(json);
 
   } catch (err) {
-    console.error("Error in /api/tvdrm:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("API error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`API running on port ${PORT}`));
